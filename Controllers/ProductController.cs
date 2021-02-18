@@ -9,6 +9,11 @@ using System.Net.Mime;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Authorization;
 
+// necesarios para upload
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
+using dotnet_core_api.env;
+using dotnet_core_api.utilities;
 namespace dotnet_core_api.Controllers
 {
 
@@ -18,7 +23,16 @@ namespace dotnet_core_api.Controllers
     [Route("api/product/")]
     public class ProductController : ControllerBase
     {
-
+        public PhotoUtilities photoUtilities = new PhotoUtilities();
+        private readonly IConfiguration _configuration;
+        public static IWebHostEnvironment _webHostEnvironment;
+        private EnviromentApp env;
+        public ProductController(IWebHostEnvironment webHostEnvironment, IConfiguration configuration)
+        {
+            _configuration = configuration;//instancio la configuracion
+            _webHostEnvironment = webHostEnvironment;
+            this.env = new EnviromentApp(_webHostEnvironment, _configuration); // se la paso a mi modelo con las constantes
+        }
         private DB_PAMYSContext db = new DB_PAMYSContext();
 
         [Route("all")]
@@ -33,7 +47,7 @@ namespace dotnet_core_api.Controllers
                   {
                       product.category = this.db.Categorys.Find(product.IdCategory);
                       product.vendor = this.db.Vendors.Find(product.IdVendor);
-                      product.ProductImages = this.db.ProductImages.Where(e => e.IdProduct == product.IdProduct).ToList();
+                      product.productsImages = this.db.ProductImages.Where(e => e.IdProduct == product.IdProduct).ToList();
                   });
                 return products;
             });
@@ -55,7 +69,7 @@ namespace dotnet_core_api.Controllers
                   {
                       product.category = this.db.Categorys.Find(product.IdCategory);
                       product.vendor = this.db.Vendors.Find(product.IdVendor);
-                      product.ProductImages = this.db.ProductImages.Where(e => e.IdProduct == product.IdProduct).ToList();
+                      product.productsImages = this.db.ProductImages.Where(e => e.IdProduct == product.IdProduct).ToList();
                   });
                     return Ok(products);
                 }
@@ -73,7 +87,7 @@ namespace dotnet_core_api.Controllers
                 var product = this.db.Products.Find(id);
                 product.category = this.db.Categorys.Find(product.IdCategory);
                 product.vendor = this.db.Vendors.Find(product.IdVendor);
-                product.ProductImages = this.db.ProductImages.Where(e => e.IdProduct == id).ToList();
+                product.productsImages = this.db.ProductImages.Where(e => e.IdProduct == id).ToList();
                 if (product != null)
                     return Ok(product);
                 else
@@ -96,13 +110,33 @@ namespace dotnet_core_api.Controllers
                   {
                       product.category = this.db.Categorys.Find(product.IdCategory);
                       product.vendor = this.db.Vendors.Find(product.IdVendor);
-                      product.ProductImages = this.db.ProductImages.Where(e => e.IdProduct == product.IdProduct).ToList();
+                      product.productsImages = this.db.ProductImages.Where(e => e.IdProduct == product.IdProduct).ToList();
                   });
                     return Ok(products);
                 }
                 return NotFound();
             });
         }
+
+        [HttpGet("search/{slug}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<Product>> getBySlug(string slug)
+        {
+            return await Task.Run<ActionResult<Product>>(() =>
+            {
+                Product product = this.db.Products.Where((product) => product.Slug == slug).FirstOrDefault();
+                if (product != null)
+                {
+                    product.category = this.db.Categorys.Find(product.IdCategory);
+                    product.vendor = this.db.Vendors.Find(product.IdVendor);
+                    product.productsImages = this.db.ProductImages.Where(e => e.IdProduct == product.IdProduct).ToList();
+                    return Ok(product);
+                }
+                return NotFound();
+            });
+        }
+
 
         [HttpPost]
         [Consumes(MediaTypeNames.Application.Json)]
@@ -120,7 +154,7 @@ namespace dotnet_core_api.Controllers
                 this.db.SaveChanges();
                 product.category = this.db.Categorys.Find(product.IdCategory);
                 product.vendor = this.db.Vendors.Find(product.IdVendor);
-                product.ProductImages = this.db.ProductImages.Where(e => e.IdProduct == product.IdProduct).ToList();
+                product.productsImages = this.db.ProductImages.Where(e => e.IdProduct == product.IdProduct).ToList();
                 return Ok(product);
             });
         }
@@ -152,7 +186,7 @@ namespace dotnet_core_api.Controllers
                     this.db.SaveChanges();
                     currentProduct.category = this.db.Categorys.Find(product.IdCategory);
                     currentProduct.vendor = this.db.Vendors.Find(product.IdVendor);
-                    currentProduct.ProductImages = this.db.ProductImages.Where(e => e.IdProduct == product.IdProduct).ToList();
+                    currentProduct.productsImages = this.db.ProductImages.Where(e => e.IdProduct == product.IdProduct).ToList();
                     return Ok(currentProduct);
                 }
                 catch (DbUpdateException)
@@ -186,5 +220,33 @@ namespace dotnet_core_api.Controllers
             });
         }
 
+
+        // upload image client
+        [Route("photos/upload")]
+        [HttpPost]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<Product>> uploadPhotoClient([FromForm] IFormFile imgFile, [FromForm] int idProduct)
+        {
+            return await Task.Run<ActionResult<Product>>(async () =>
+            {
+                var productCurrent = this.db.Products.Find(idProduct);
+                // existe un cliente y la imgfile almenos algo
+                if (productCurrent != null || imgFile.Length != 0)
+                {
+                    string path = this.env.pathProductsThumbnailPhotos;
+                    // nombre copio el archivo y retorna el namefile
+                    string nameFileEncript = await this.photoUtilities.copyPhoto(imgFile, path);
+                    //elimina el archivo si existe
+                    await this.photoUtilities.removePhoto(productCurrent.ThumbnailUrl, path);
+                    // guardo en la bd
+                    productCurrent.ThumbnailUrl = nameFileEncript;
+                    this.db.SaveChanges();
+                    return Ok(productCurrent);
+                }
+                return BadRequest();
+
+            });
+        }
     }
 }
